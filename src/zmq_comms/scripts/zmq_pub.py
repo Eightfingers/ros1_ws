@@ -1,0 +1,70 @@
+#!/usr/bin/env python3
+
+import zmq
+import rospy
+from geometry_msgs.msg import PoseStamped
+from nav_msgs.msg import Odometry
+import io
+
+# Reponsible for republishing mavros local position with offsets (therefore its global position) and over ZMQ to other drones
+# Odom and Pose contain the same data value its more for compatibility!!
+
+class ZMQCommsPub:
+    def __init__(self):
+        rospy.init_node('pose_publisher', anonymous=True)
+        rospy.on_shutdown(self.shutdown_node)
+
+        self.subscriber = rospy.Subscriber('/mavros/local_position/pose', PoseStamped, self.pose_callback)
+        self.self_drone_pose_pub = rospy.Publisher("/drone_self/global_position/pose", PoseStamped, queue_size=10)
+        self.self_drone_odom_pub = rospy.Publisher("/drone_self/global_position/odom", Odometry, queue_size=10)
+        self.offset_x = rospy.get_param('x_offset', 0)
+        self.offset_y = rospy.get_param('y_offset', 0)
+        self.offset_z = rospy.get_param('z_offset', 0)
+
+        # Limit the amount of publishing
+        self.counter = 0
+        self.counter_max = 2
+
+        # ZeroMQ setup
+        self.context = zmq.Context()
+        self.socket = self.context.socket(zmq.PUB)
+        self.socket.bind("tcp://*:5555")  # Publisher binds to port 5555
+        rospy.loginfo("Local socket is ready ")
+    
+    def pose_callback(self, msg):
+        # Create a BytesIO buffer for serialization
+        buffer = io.BytesIO()
+        msg.pose.position.x += self.offset_x
+        msg.pose.position.y += self.offset_y
+        msg.pose.position.z += self.offset_z
+        msg.header.frame_id = 'map'
+        self.counter += 1
+        
+        if self.counter == self.counter_max:
+            self.counter = 0
+
+            # Serialize the message into the buffer
+            msg.serialize(buffer)
+
+            # serialized_msg = roslib.message.serialize_message(msg)D
+            # Send serialized message over ZeroMQ
+            message = b"Odometry " + buffer.getvalue()  # Combine topic label and serialized message
+            self.socket.send(message)  # Send raw bytes
+
+        # Publish self pose
+        self.self_drone_pose_pub.publish(msg)
+
+        # Publish self odom
+        odom_msg = Odometry()
+        odom_msg.pose.pose = msg.pose
+        odom_msg.header= msg.header
+        self.self_drone_odom_pub.publish(odom_msg)
+
+    def shutdown_node(self):
+        rospy.loginfo("Shutting down self pose publisher")
+        self.socket.close()
+        self.context.term()
+
+if __name__ == "__main__":
+    node = ZMQCommsPub()
+    rospy.spin()
