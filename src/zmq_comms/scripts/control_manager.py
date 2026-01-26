@@ -10,8 +10,10 @@ from mavros_msgs.srv import CommandBool, CommandBoolRequest, SetMode, SetModeReq
 from geometry_msgs.msg import TwistStamped
 from geometry_msgs.msg import PoseStamped
 from std_msgs.msg import String
-
 from std_msgs.msg import Header
+
+from zmq_comms.msg import PositionCommand
+
 import math
 
 class AGENT_STATES:
@@ -26,16 +28,16 @@ class AGENT_STATES:
 TAKEOFF_HEIGHT = 1.1  # meters
 
 class AgentStateManager:
-    def velocity_callback(self,data):
-        self.vel_yaw_msg.velocity.x = data.twist.linear.x
-        self.vel_yaw_msg.velocity.y = data.twist.linear.y
-        self.vel_yaw_msg.velocity.z = data.twist.linear.z
-        
+
+    def handle_position_command(self, msg: PositionCommand):
+        rospy.loginfo(f"Received PositionCommand: x={msg.velocity.x}, y={msg.velocity.y}, z={msg.velocity.z}, yaw={msg.yaw}")
+        self.vel_yaw_msg.velocity.x = msg.velocity.x
+        self.vel_yaw_msg.velocity.y = msg.velocity.y
+        self.vel_yaw_msg.velocity.z = msg.velocity.z
         vx = self.vel_yaw_msg.velocity.x
         vy = self.vel_yaw_msg.velocity.y
         vz = self.vel_yaw_msg.velocity.z
-
-        self.last_valid_cmd = data.header.stamp
+        self.last_valid_cmd = msg.header.stamp
 
         # Calculate magnitude
         magnitude = math.sqrt(vx**2 + vy**2 + vz**2)
@@ -44,6 +46,25 @@ class AgentStateManager:
             print("HOVERING TRIGGERED !!! ")
         else:
             self.agent_state == AGENT_STATES.RUNNING
+
+    # def velocity_callback(self,data):
+    #     self.vel_yaw_msg.velocity.x = data.twist.linear.x
+    #     self.vel_yaw_msg.velocity.y = data.twist.linear.y
+    #     self.vel_yaw_msg.velocity.z = data.twist.linear.z
+        
+    #     vx = self.vel_yaw_msg.velocity.x
+    #     vy = self.vel_yaw_msg.velocity.y
+    #     vz = self.vel_yaw_msg.velocity.z
+
+    #     self.last_valid_cmd = data.header.stamp
+
+    #     # Calculate magnitude
+    #     magnitude = math.sqrt(vx**2 + vy**2 + vz**2)
+    #     if (magnitude < 0.10):
+    #         self.agent_state == AGENT_STATES.HOVERING
+    #         print("HOVERING TRIGGERED !!! ")
+    #     else:
+    #         self.agent_state == AGENT_STATES.RUNNING
 
     def yaw_callback(self, data):
         # Account for starling2 frame
@@ -86,7 +107,8 @@ class AgentStateManager:
         self.setpoint_pub = rospy.Publisher("/mavros/setpoint_raw/local", PositionTarget, queue_size=10)
 
         # Subscribers
-        self.velocity_sub = rospy.Subscriber("/planning/cmd_linear_vel_2", TwistStamped, self.velocity_callback)
+        # self.velocity_sub = rospy.Subscriber("/planning/cmd_linear_vel_2", TwistStamped, self.velocity_callback)
+        self.velocity_sub = rospy.Subscriber("/planning/cmd_linear_vel_2", PositionCommand, self.handle_position_command)
         self.yaw_sub = rospy.Subscriber("/planning/cmd_yaw_2", TwistStamped, self.yaw_callback)
         self.agent_state_sub = rospy.Subscriber("/agent/state", String, self.agent_state_callback)
         self.pose_sub = rospy.Subscriber("/mavros/local_position/pose", PoseStamped, self.pose_callback)
@@ -95,7 +117,7 @@ class AgentStateManager:
         self.state_sub = rospy.Subscriber("mavros/state", State, self.px4_state_cb)
 
         rospy.loginfo("Waiting for mavros services")
-        rospy.wait_for_service("/mavros/cmd/arming")
+        # rospy.wait_for_service("/mavros/cmd/arming")
         self.arming_client = rospy.ServiceProxy("mavros/cmd/arming", CommandBool)
 
         rospy.wait_for_service("/mavros/set_mode")

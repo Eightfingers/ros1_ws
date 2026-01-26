@@ -17,7 +17,7 @@ import time
 
 # NUS VICON ROOM
 # POSITIVE X -> is Left
-# POSITIVE Y -> is back 
+# POSITIVE Y -> is backward
 
 class PosePublisher:
     def __init__(self):
@@ -41,8 +41,8 @@ class PosePublisher:
         # msg.pose.position.y = 2.00
         # msg.pose.position.z = 1.0
 
-        msg.pose.position.x = -2.0
-        msg.pose.position.y = -2.0
+        msg.pose.position.x = 2.0
+        msg.pose.position.y = 0.0
         # msg.pose.position.y = 0.0
         msg.pose.position.z = 1.2
 
