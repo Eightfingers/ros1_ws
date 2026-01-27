@@ -1,7 +1,7 @@
-#!/usr/bin/env python3
+#!/usr/bin/env python
 
-# Script to takes in NUS velocity and yaw setpoints and outputs them to mavros commands
-# Also keeps track of drone state and PX4 state
+# Script to takes in NUS velocity and yaw setpoints
+# And outputs them to mavros commands
 
 import rospy
 from mavros_msgs.msg import PositionTarget
@@ -10,10 +10,9 @@ from mavros_msgs.srv import CommandBool, CommandBoolRequest, SetMode, SetModeReq
 from geometry_msgs.msg import TwistStamped
 from geometry_msgs.msg import PoseStamped
 from std_msgs.msg import String
-from std_msgs.msg import Header
-
 from quadrotor_msgs.msg import PositionCommand
 
+from std_msgs.msg import Header
 import math
 
 class AGENT_STATES:
@@ -29,48 +28,16 @@ TAKEOFF_HEIGHT = 1.1  # meters
 
 class AgentStateManager:
 
-    def handle_position_command(self, msg: PositionCommand):
-        rospy.loginfo(f"Received PositionCommand: x={msg.velocity.x}, y={msg.velocity.y}, z={msg.velocity.z}, yaw={msg.yaw}")
-        self.vel_yaw_msg.velocity.x = msg.velocity.x
-        self.vel_yaw_msg.velocity.y = msg.velocity.y
-        self.vel_yaw_msg.velocity.z = msg.velocity.z
-        vx = self.vel_yaw_msg.velocity.x
-        vy = self.vel_yaw_msg.velocity.y
-        vz = self.vel_yaw_msg.velocity.z
-        self.last_valid_cmd = msg.header.stamp
+    def command_callback(self, data):
+        self.vel_yaw_msg.velocity.x = data.velocity.x
+        self.vel_yaw_msg.velocity.y = data.velocity.y
+        self.vel_yaw_msg.velocity.z = data.velocity.z
 
-        # Calculate magnitude
-        magnitude = math.sqrt(vx**2 + vy**2 + vz**2)
-        if (magnitude < 0.10):
-            self.agent_state == AGENT_STATES.HOVERING
-            print("HOVERING TRIGGERED !!! ")
-        else:
-            self.agent_state == AGENT_STATES.RUNNING
+        self.vel_yaw_msg.position.x = data.position.x
+        self.vel_yaw_msg.position.y = data.position.y
+        self.vel_yaw_msg.position.z = data.position.z
 
-    # def velocity_callback(self,data):
-    #     self.vel_yaw_msg.velocity.x = data.twist.linear.x
-    #     self.vel_yaw_msg.velocity.y = data.twist.linear.y
-    #     self.vel_yaw_msg.velocity.z = data.twist.linear.z
-        
-    #     vx = self.vel_yaw_msg.velocity.x
-    #     vy = self.vel_yaw_msg.velocity.y
-    #     vz = self.vel_yaw_msg.velocity.z
-
-    #     self.last_valid_cmd = data.header.stamp
-
-    #     # Calculate magnitude
-    #     magnitude = math.sqrt(vx**2 + vy**2 + vz**2)
-    #     if (magnitude < 0.10):
-    #         self.agent_state == AGENT_STATES.HOVERING
-    #         print("HOVERING TRIGGERED !!! ")
-    #     else:
-    #         self.agent_state == AGENT_STATES.RUNNING
-
-    def yaw_callback(self, data):
-        # Account for starling2 frame
-        # setpoint.yaw = data.x + 1.57
-        self.vel_yaw_msg.yaw = data.twist.linear.x
-
+        self.vel_yaw_msg.yaw = data.yaw
         self.last_valid_cmd = data.header.stamp
 
     def pose_callback(self, data):
@@ -79,7 +46,6 @@ class AgentStateManager:
     def px4_state_cb(self, data):
         self.px4_current_state = data
         rospy.loginfo("PX4_STATE: {}, ARMED_STATE: {}, AGENT_STATE: {}".format(self.px4_current_state.mode, self.px4_current_state.armed, self.agent_state))
-        rospy.loginfo("Linear, X: {}, Y: {}, Z: {} -- Yaw: {}".format(self.vel_yaw_msg.velocity.x, self.vel_yaw_msg.velocity.y, self.vel_yaw_msg.velocity.z, self.vel_yaw_msg.yaw))
 
     def agent_state_callback(self, data):
         self.agent_state = int(data.data) 
@@ -99,6 +65,9 @@ class AgentStateManager:
         # Flags
         self.request_available_flag = False 
         self.valid_cmd_flag = False
+        self.small_vel = False
+        self.small_x_vel = False
+        self.small_y_vel = False
 
         rospy.loginfo("Initializing control manager node...")
         rospy.init_node("agent_state_manager", anonymous=True)
@@ -107,9 +76,10 @@ class AgentStateManager:
         self.setpoint_pub = rospy.Publisher("/mavros/setpoint_raw/local", PositionTarget, queue_size=10)
 
         # Subscribers
+        self.action_sub = rospy.Subscriber("/agent001/action", PositionCommand, self.command_callback)
+
         # self.velocity_sub = rospy.Subscriber("/planning/cmd_linear_vel_2", TwistStamped, self.velocity_callback)
-        self.velocity_sub = rospy.Subscriber("/planning/cmd_linear_vel_2", PositionCommand, self.handle_position_command)
-        self.yaw_sub = rospy.Subscriber("/planning/cmd_yaw_2", TwistStamped, self.yaw_callback)
+        # self.yaw_sub = rospy.Subscriber("/planning/cmd_yaw_2", TwistStamped, self.yaw_callback)
         self.agent_state_sub = rospy.Subscriber("/agent/state", String, self.agent_state_callback)
         self.pose_sub = rospy.Subscriber("/mavros/local_position/pose", PoseStamped, self.pose_callback)
 
@@ -181,9 +151,42 @@ class AgentStateManager:
 
         # Enter Main Control Loop
         while not rospy.is_shutdown():
-            self.request_available_flag = (rospy.Time.now() - self.last_req) > rospy.Duration(5.0)
-            self.valid_cmd_flag = rospy.Time.now() - self.last_valid_cmd < rospy.Duration(1.0)
 
+            self.vel_yaw_msg.type_mask = (
+                PositionTarget.IGNORE_PX | PositionTarget.IGNORE_PY | PositionTarget.IGNORE_PZ |
+                # PositionTarget.IGNORE_VX | PositionTarget.IGNORE_VY | PositionTarget.IGNORE_VZ |
+                PositionTarget.IGNORE_AFX | PositionTarget.IGNORE_AFY | PositionTarget.IGNORE_AFZ |
+                PositionTarget.IGNORE_YAW_RATE
+            )
+
+            self.request_available_flag = (rospy.Time.now() - self.last_req) > rospy.Duration(5.0)
+
+            self.valid_cmd_flag = rospy.Time.now() - self.last_valid_cmd < rospy.Duration(1.0)
+            # Check for small vel
+            vx = self.vel_yaw_msg.velocity.x
+            vy = self.vel_yaw_msg.velocity.y
+            vz = self.vel_yaw_msg.velocity.z
+
+            print("Velocity, X: {}, Y: {}, Z: {} -- Yaw: {}".format(self.vel_yaw_msg.velocity.x, self.vel_yaw_msg.velocity.y, self.vel_yaw_msg.velocity.z, self.vel_yaw_msg.yaw))
+
+            # Calculate magnitude
+            magnitude = math.sqrt(vx**2 + vy**2 + vz**2)
+            if (magnitude < 0.02 and self.agent_state == AGENT_STATES.RUNNING):
+                self.agent_state = AGENT_STATES.HOVERING
+                self.small_vel = True
+            else:
+                self.small_vel = False
+
+            # Check which axis has smaller velocities
+            if (vx < 0.15):
+                self.small_x_vel = True
+            else:
+                self.small_x_vel = False
+            if (vy < 0.15):
+                self.small_y_vel = True
+            else:
+                self.small_y_vel = False
+            
             if (self.agent_state == AGENT_STATES.TAKING_OFF):
                 if(self.px4_current_state.mode != "OFFBOARD" and self.request_available_flag):
                     if(self.set_mode_client.call(self.offb_set_mode).mode_sent == True):
@@ -209,9 +212,8 @@ class AgentStateManager:
 
             elif (self.agent_state == AGENT_STATES.HOVERING):
                 self.setpoint_pub.publish(self.position_msg)
-                # check for valid commands
-                if  (self.valid_cmd_flag):
-                    rospy.loginfo("Recieved valid velocity commands, switching to RUNNING state")
+                if  (self.valid_cmd_flag and self.small_vel == False):
+                    rospy.loginfo("Recieved a recent and enough velocity commands and enough , switching to RUNNING state")
                     self.agent_state = AGENT_STATES.RUNNING
                 else:
                     rospy.loginfo("Waiting for VALID or RECENT ENOUGH velocity commands to switch to RUNNING state")
@@ -220,6 +222,28 @@ class AgentStateManager:
                 self.position_msg.position.x = self.agent_pose.pose.position.x
                 self.position_msg.position.y = self.agent_pose.pose.position.y
                 self.position_msg.position.z = self.agent_pose.pose.position.z
+
+                # hehe 
+                if (self.small_x_vel):
+                    print(" 111111111111111111111111 small x vel 111111111111111111111111 ")
+                    self.vel_yaw_msg.type_mask = (
+                        # PositionTarget.IGNORE_PX | PositionTarget.IGNORE_PY | PositionTarget.IGNORE_PZ |
+                        # PositionTarget.IGNORE_VX | PositionTarget.IGNORE_VY | PositionTarget.IGNORE_VZ |
+                        PositionTarget.IGNORE_AFX | PositionTarget.IGNORE_AFY | PositionTarget.IGNORE_AFZ |
+                        PositionTarget.IGNORE_YAW_RATE
+                    )
+                    self.vel_yaw_msg.position.x = self.vel_yaw_msg.position.x + 0.25 * self.vel_yaw_msg.velocity.x 
+
+                if (self.small_y_vel):
+                    print(" ********************************* small y vel ********************************************** ")
+                    self.vel_yaw_msg.type_mask = (
+                        # PositionTarget.IGNORE_PX | PositionTarget.IGNORE_PY | PositionTarget.IGNORE_PZ |
+                        # PositionTarget.IGNORE_VX | PositionTarget.IGNORE_VY | PositionTarget.IGNORE_VZ |
+                        PositionTarget.IGNORE_AFX | PositionTarget.IGNORE_AFY | PositionTarget.IGNORE_AFZ |
+                        PositionTarget.IGNORE_YAW_RATE
+                    )
+                    self.vel_yaw_msg.position.y = self.vel_yaw_msg.position.y + 0.25 * self.vel_yaw_msg.velocity.y 
+
                 if (self.valid_cmd_flag):
                     self.setpoint_pub.publish(self.vel_yaw_msg)
                 else:
