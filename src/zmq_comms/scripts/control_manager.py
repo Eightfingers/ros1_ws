@@ -12,7 +12,7 @@ from geometry_msgs.msg import PoseStamped
 from std_msgs.msg import String
 from std_msgs.msg import Header
 
-from zmq_comms.msg import PositionCommand
+from quadrotor_msgs.msg import PositionCommand
 
 import math
 
@@ -117,7 +117,7 @@ class AgentStateManager:
         self.state_sub = rospy.Subscriber("mavros/state", State, self.px4_state_cb)
 
         rospy.loginfo("Waiting for mavros services")
-        # rospy.wait_for_service("/mavros/cmd/arming")
+        rospy.wait_for_service("/mavros/cmd/arming")
         self.arming_client = rospy.ServiceProxy("mavros/cmd/arming", CommandBool)
 
         rospy.wait_for_service("/mavros/set_mode")
