@@ -15,6 +15,12 @@ from quadrotor_msgs.msg import PositionCommand
 from std_msgs.msg import Header
 import math
 
+## Parameters
+TAKEOFF_HEIGHT = 1.1 
+SMALL_VEL_MAGNITUDE = 0.02
+SMALL_VEL_AXIS = 0.15
+POSITION_GAIN = 0.25
+
 class AGENT_STATES:
     INIT = 1
     TAKING_OFF = 2
@@ -24,20 +30,18 @@ class AGENT_STATES:
     LANDING_TRIGGERED = 6
     LANDING = 7
 
-TAKEOFF_HEIGHT = 1.1  # meters
-
 class AgentStateManager:
 
     def command_callback(self, data):
-        self.vel_yaw_msg.velocity.x = data.velocity.x
-        self.vel_yaw_msg.velocity.y = data.velocity.y
-        self.vel_yaw_msg.velocity.z = data.velocity.z
+        self.input_commands.velocity.x = data.velocity.x
+        self.input_commands.velocity.y = data.velocity.y
+        self.input_commands.velocity.z = data.velocity.z
 
-        self.vel_yaw_msg.position.x = data.position.x
-        self.vel_yaw_msg.position.y = data.position.y
-        self.vel_yaw_msg.position.z = data.position.z
+        self.input_commands.position.x = data.position.x
+        self.input_commands.position.y = data.position.y
+        self.input_commands.position.z = data.position.z
 
-        self.vel_yaw_msg.yaw = data.yaw
+        self.input_commands.yaw = data.yaw
         self.last_valid_cmd = data.header.stamp
 
     def pose_callback(self, data):
@@ -50,21 +54,55 @@ class AgentStateManager:
     def agent_state_callback(self, data):
         self.agent_state = int(data.data) 
         rospy.loginfo("New agent state input!!: {}".format(self.agent_state))
+
+    def check_conditional_flags(self):
+            # Ensure enough time has passed between subsequent PX4 requests
+            self.px4_request_available_flag = (rospy.Time.now() - self.last_req) > rospy.Duration(5.0)
+            # Ensure that command to be sent is recent enough
+            self.recent_command_flag = rospy.Time.now() - self.last_valid_cmd < rospy.Duration(1.0)
+
+            # Check for small vel
+            vx = self.input_commands.velocity.x
+            vy = self.input_commands.velocity.y
+            vz = self.input_commands.velocity.z
+            print("Velocity, X: {}, Y: {}, Z: {} -- Yaw: {}".format(self.input_commands.velocity.x, self.input_commands.velocity.y, self.input_commands.velocity.z, self.input_commands.yaw))
+            # Calculate magnitude
+            magnitude = math.sqrt(vx**2 + vy**2 + vz**2)
+            if (magnitude < SMALL_VEL_MAGNITUDE and self.agent_state == AGENT_STATES.RUNNING):
+                self.agent_state = AGENT_STATES.HOVERING
+                self.small_vel = True
+            else:
+                self.small_vel = False
+
+            # Check which axis has smaller velocities
+            if (vx < SMALL_VEL_AXIS):
+                self.small_x_vel = True
+            else:
+                self.small_x_vel = False
+            if (vy < SMALL_VEL_AXIS):
+                self.small_y_vel = True
+            else:
+                self.small_y_vel = False
     
     def check_takeoff_finished(self):
         return self.agent_pose.pose.position.z >= 0.90 * TAKEOFF_HEIGHT
 
+    def update_hover_position(self):
+        self.hover_position_msg.position.x = self.agent_pose.pose.position.x
+        self.hover_position_msg.position.y = self.agent_pose.pose.position.y
+        self.hover_position_msg.position.z = self.agent_pose.pose.position.z
+
     def __init__(self):
-        self.vel_yaw_msg = PositionTarget()
-        self.position_msg = PositionTarget()
+        self.input_commands = PositionTarget()
+        self.hover_position_msg = PositionTarget()
         self.agent_pose = PoseStamped()
         self.yaw = 0.0
-        self.agent_state = AGENT_STATES.INIT # CURRENT STATE
+        self.agent_state = AGENT_STATES.INIT 
         self.px4_current_state = State()
 
         # Flags
-        self.request_available_flag = False 
-        self.valid_cmd_flag = False
+        self.px4_request_available_flag = False 
+        self.recent_command_flag = False
         self.small_vel = False
         self.small_x_vel = False
         self.small_y_vel = False
@@ -77,13 +115,8 @@ class AgentStateManager:
 
         # Subscribers
         self.action_sub = rospy.Subscriber("/agent001/action", PositionCommand, self.command_callback)
-
-        # self.velocity_sub = rospy.Subscriber("/planning/cmd_linear_vel_2", TwistStamped, self.velocity_callback)
-        # self.yaw_sub = rospy.Subscriber("/planning/cmd_yaw_2", TwistStamped, self.yaw_callback)
         self.agent_state_sub = rospy.Subscriber("/agent/state", String, self.agent_state_callback)
         self.pose_sub = rospy.Subscriber("/mavros/local_position/pose", PoseStamped, self.pose_callback)
-
-        # Mavros stuffs
         self.state_sub = rospy.Subscriber("mavros/state", State, self.px4_state_cb)
 
         rospy.loginfo("Waiting for mavros services")
@@ -93,36 +126,36 @@ class AgentStateManager:
         rospy.wait_for_service("/mavros/set_mode")
         self.set_mode_client = rospy.ServiceProxy("mavros/set_mode", SetMode)
 
-        # Initialize velocity yaw setpoint msgs
-        self.vel_yaw_msg.header = Header()
-        self.vel_yaw_msg.header.frame_id ='drone_body'
-        self.vel_yaw_msg.coordinate_frame = PositionTarget.FRAME_LOCAL_NED
+        # Initialize velocity yaw PositionTarget msgs
+        self.input_commands.header = Header()
+        self.input_commands.header.frame_id ='drone_body'
+        self.input_commands.coordinate_frame = PositionTarget.FRAME_LOCAL_NED
         # Type mask: Ignore everything except Velocity and YAW
-        self.vel_yaw_msg.type_mask = (
+        self.input_commands.type_mask = (
             PositionTarget.IGNORE_PX | PositionTarget.IGNORE_PY | PositionTarget.IGNORE_PZ |
             # PositionTarget.IGNORE_VX | PositionTarget.IGNORE_VY | PositionTarget.IGNORE_VZ |
             PositionTarget.IGNORE_AFX | PositionTarget.IGNORE_AFY | PositionTarget.IGNORE_AFZ |
             PositionTarget.IGNORE_YAW_RATE
         )
-        self.vel_yaw_msg.velocity.x = 0.0
-        self.vel_yaw_msg.velocity.y = 0.0
-        self.vel_yaw_msg.velocity.z = 0.0 
-        self.vel_yaw_msg.yaw = 0
+        self.input_commands.velocity.x = 0.0
+        self.input_commands.velocity.y = 0.0
+        self.input_commands.velocity.z = 0.0 
+        self.input_commands.yaw = 0
 
-        # Initialize position setpoints msgs
-        self.position_msg.header = Header()
-        self.position_msg.header.frame_id ='drone_body'
-        self.position_msg.coordinate_frame = PositionTarget.FRAME_LOCAL_NED
+        # Initialize position raw target msgs
+        self.hover_position_msg.header = Header()
+        self.hover_position_msg.header.frame_id ='drone_body'
+        self.hover_position_msg.coordinate_frame = PositionTarget.FRAME_LOCAL_NED
         # Type mask: Ignore everything except position and YAW
-        self.position_msg.type_mask = (
+        self.hover_position_msg.type_mask = (
             # PositionTarget.IGNORE_PX | PositionTarget.IGNORE_PY | PositionTarget.IGNORE_PZ |
             PositionTarget.IGNORE_VX | PositionTarget.IGNORE_VY | PositionTarget.IGNORE_VZ |
             PositionTarget.IGNORE_AFX | PositionTarget.IGNORE_AFY | PositionTarget.IGNORE_AFZ |
             PositionTarget.IGNORE_YAW_RATE | PositionTarget.IGNORE_YAW
         )
-        self.position_msg.position.x = 0.0
-        self.position_msg.position.y = 0.0
-        self.position_msg.position.z = 1.0  # Take off height
+        self.hover_position_msg.position.x = 0.0
+        self.hover_position_msg.position.y = 0.0
+        self.hover_position_msg.position.z = TAKEOFF_HEIGHT
 
         self.offb_set_mode = SetModeRequest()
         self.offb_set_mode.custom_mode = 'OFFBOARD'
@@ -139,113 +172,84 @@ class AgentStateManager:
 
         rate = rospy.Rate(100)
 
+        # START OF INIT CODE
         rospy.loginfo("Sending dummy setpoints before arming")
         for i in range(100):
             if(rospy.is_shutdown()):
                 break
-            self.setpoint_pub.publish(self.position_msg)
+            self.setpoint_pub.publish(self.hover_position_msg)
             rate.sleep()
         rospy.loginfo("Finished sending dummy setpoings")
-
         rospy.loginfo("Initiaizing Finished")
 
         # Enter Main Control Loop
         while not rospy.is_shutdown():
+            self.check_conditional_flags()
 
-            self.vel_yaw_msg.type_mask = (
+            # Reset mask to velocity by default
+            self.input_commands.type_mask = (
                 PositionTarget.IGNORE_PX | PositionTarget.IGNORE_PY | PositionTarget.IGNORE_PZ |
                 # PositionTarget.IGNORE_VX | PositionTarget.IGNORE_VY | PositionTarget.IGNORE_VZ |
                 PositionTarget.IGNORE_AFX | PositionTarget.IGNORE_AFY | PositionTarget.IGNORE_AFZ |
                 PositionTarget.IGNORE_YAW_RATE
             )
 
-            self.request_available_flag = (rospy.Time.now() - self.last_req) > rospy.Duration(5.0)
-
-            self.valid_cmd_flag = rospy.Time.now() - self.last_valid_cmd < rospy.Duration(1.0)
-            # Check for small vel
-            vx = self.vel_yaw_msg.velocity.x
-            vy = self.vel_yaw_msg.velocity.y
-            vz = self.vel_yaw_msg.velocity.z
-
-            print("Velocity, X: {}, Y: {}, Z: {} -- Yaw: {}".format(self.vel_yaw_msg.velocity.x, self.vel_yaw_msg.velocity.y, self.vel_yaw_msg.velocity.z, self.vel_yaw_msg.yaw))
-
-            # Calculate magnitude
-            magnitude = math.sqrt(vx**2 + vy**2 + vz**2)
-            if (magnitude < 0.02 and self.agent_state == AGENT_STATES.RUNNING):
-                self.agent_state = AGENT_STATES.HOVERING
-                self.small_vel = True
-            else:
-                self.small_vel = False
-
-            # Check which axis has smaller velocities
-            if (vx < 0.15):
-                self.small_x_vel = True
-            else:
-                self.small_x_vel = False
-            if (vy < 0.15):
-                self.small_y_vel = True
-            else:
-                self.small_y_vel = False
-            
+            # State Machine
             if (self.agent_state == AGENT_STATES.TAKING_OFF):
-                if(self.px4_current_state.mode != "OFFBOARD" and self.request_available_flag):
+                if(self.px4_current_state.mode != "OFFBOARD" and self.px4_request_available_flag):
                     if(self.set_mode_client.call(self.offb_set_mode).mode_sent == True):
                         rospy.loginfo("OFFBOARD enabled")
                         self.last_req = rospy.Time.now()
                     else:
                         rospy.logwarn("OFFBOARD enable failed!!!")
 
-                elif(self.px4_current_state.mode == "OFFBOARD" and not self.px4_current_state.armed and self.request_available_flag):
+                elif(self.px4_current_state.mode == "OFFBOARD" and not self.px4_current_state.armed and self.px4_request_available_flag):
                     if(self.arming_client.call(self.arm_cmd).success == True):
                         rospy.loginfo("Vehicle armed")
                         self.last_req = rospy.Time.now()
                     else:
                         rospy.logwarn("Vehicle arming failed!!!")
 
-                self.position_msg.position.x = self.agent_pose.pose.position.x
-                self.position_msg.position.y = self.agent_pose.pose.position.y
-                self.position_msg.position.z = TAKEOFF_HEIGHT
-                self.setpoint_pub.publish(self.position_msg)
+                self.hover_position_msg.position.x = self.agent_pose.pose.position.x
+                self.hover_position_msg.position.y = self.agent_pose.pose.position.y
+                self.hover_position_msg.position.z = TAKEOFF_HEIGHT
+                self.setpoint_pub.publish(self.hover_position_msg)
                 if self.check_takeoff_finished():
                     rospy.loginfo("Takeoff finished detected!")
                     self.agent_state = AGENT_STATES.HOVERING
 
             elif (self.agent_state == AGENT_STATES.HOVERING):
-                self.setpoint_pub.publish(self.position_msg)
-                if  (self.valid_cmd_flag and self.small_vel == False):
-                    rospy.loginfo("Recieved a recent and enough velocity commands and enough , switching to RUNNING state")
+                self.setpoint_pub.publish(self.hover_position_msg)
+                if  (self.recent_command_flag and not self.small_vel ):
+                    rospy.loginfo("Recieved a RECENT ENOUGH and VALID velocity command, switching to RUNNING state")
                     self.agent_state = AGENT_STATES.RUNNING
                 else:
                     rospy.loginfo("Waiting for VALID or RECENT ENOUGH velocity commands to switch to RUNNING state")
 
             elif (self.agent_state == AGENT_STATES.RUNNING):
-                self.position_msg.position.x = self.agent_pose.pose.position.x
-                self.position_msg.position.y = self.agent_pose.pose.position.y
-                self.position_msg.position.z = self.agent_pose.pose.position.z
-
-                # hehe 
+                self.update_hover_position()
                 if (self.small_x_vel):
-                    print(" 111111111111111111111111 small x vel 111111111111111111111111 ")
-                    self.vel_yaw_msg.type_mask = (
+                    rospy.loginfo(" 1111111111111111111111111111111111111111 small x vel 1111111111111111111111111111111111111111")
+                    self.input_commands.type_mask = (
                         # PositionTarget.IGNORE_PX | PositionTarget.IGNORE_PY | PositionTarget.IGNORE_PZ |
                         # PositionTarget.IGNORE_VX | PositionTarget.IGNORE_VY | PositionTarget.IGNORE_VZ |
                         PositionTarget.IGNORE_AFX | PositionTarget.IGNORE_AFY | PositionTarget.IGNORE_AFZ |
                         PositionTarget.IGNORE_YAW_RATE
                     )
-                    self.vel_yaw_msg.position.x = self.vel_yaw_msg.position.x + 0.25 * self.vel_yaw_msg.velocity.x 
+                    self.input_commands.position.x = self.input_commands.position.x + POSITION_GAIN * self.input_commands.velocity.x 
 
                 if (self.small_y_vel):
-                    print(" ********************************* small y vel ********************************************** ")
-                    self.vel_yaw_msg.type_mask = (
+                    rospy.loginfo("********************************* small y vel ********************************************")
+                    self.input_commands.type_mask = (
                         # PositionTarget.IGNORE_PX | PositionTarget.IGNORE_PY | PositionTarget.IGNORE_PZ |
                         # PositionTarget.IGNORE_VX | PositionTarget.IGNORE_VY | PositionTarget.IGNORE_VZ |
                         PositionTarget.IGNORE_AFX | PositionTarget.IGNORE_AFY | PositionTarget.IGNORE_AFZ |
                         PositionTarget.IGNORE_YAW_RATE
                     )
-                    self.vel_yaw_msg.position.y = self.vel_yaw_msg.position.y + 0.25 * self.vel_yaw_msg.velocity.y 
+                    self.input_commands.position.y = self.input_commands.position.y + POSITION_GAIN * self.input_commands.velocity.y 
 
-                if (self.valid_cmd_flag):
-                    self.setpoint_pub.publish(self.vel_yaw_msg)
+                if (self.recent_command_flag):
+                    self.setpoint_pub.publish(self.input_commands)
                 else:
                     self.agent_state = AGENT_STATES.HOVERING 
                     print("Going back to Hovering state- No valid velocity commands received recently")
