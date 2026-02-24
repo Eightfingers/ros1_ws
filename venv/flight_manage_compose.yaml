@@ -1,0 +1,20 @@
+services:
+  flight_manage:
+    image: eightfingers123/ros1_zmq_tests:arm64
+    
+    container_name: flight_manager
+    
+    env_file:
+      - 207.env
+      
+    ipc: host
+    
+    network_mode: host
+    
+    command: stdbuf -o L roslaunch flight_manage flight_manage.launch
+
+    # 6. Interactive and TTY settings (for -it)
+    #    'stdin_open: true' is equivalent to -i
+    #    'tty: true' is equivalent to -t
+    # stdin_open: true 
+    # tty: true

@@ -1,0 +1,22 @@
+services:
+  comms:
+    image: eightfingers123/ros1_zmq_tests:arm64
+    
+    container_name: comms
+    
+    env_file:
+      - 207.env
+      
+    ipc: host
+    
+    network_mode: host
+    
+    command: stdbuf -o L roslaunch zmq_comms d2d_comms.launch
+
+    volumes:
+    - ./Autonomy/Systems/ros1_ws:/Autonomy/Systems/ros1_ws
+    # 6. Interactive and TTY settings (for -it)
+    #    'stdin_open: true' is equivalent to -i
+    #    'tty: true' is equivalent to -t
+    # stdin_open: true 
+    # tty: true

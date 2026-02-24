@@ -17,7 +17,7 @@ RUN apt-get update && apt-get install -y \
 # Install Python package pyzmq
 RUN pip3 install --upgrade pip setuptools wheel \
  && pip3 install --upgrade numpy \
- && pip3 install pyzmq ping3 
+ && pip3 install pyzmq ping3
 
 # Set up the workspace in the container
 WORKDIR /workspace
