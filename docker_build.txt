@@ -1,2 +1,7 @@
+To build an ARM64 image in x86 / AMD64 install the following 
+docker run --privileged --rm tonistiigi/binfmt --install all
+docker buildx create --use
+
 docker build -f Dockerfile --platform linux/arm64/v8 . -t eightfingers123/ros1_zmq_tests
 docker run -it --ipc=host --network=host eightfingers123/ros1_zmq_tests
+

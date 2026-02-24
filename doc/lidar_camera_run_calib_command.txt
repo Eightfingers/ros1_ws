@@ -1,0 +1,62 @@
+# Preprocessing
+docker run \
+  -it \
+  --rm \
+  --net host \
+  -e DISPLAY=$DISPLAY \
+  -e LIBGL_ALWAYS_SOFTWARE=1 \
+  -v $HOME/.Xauthority:/root/.Xauthority \
+  -v ~/calib_bags:/tmp/input_bags \
+  -v ~/preprocessed:/tmp/preprocessed \
+  koide3/direct_visual_lidar_calibration:noetic \
+  rosrun direct_visual_lidar_calibration preprocess -av /tmp/input_bags /tmp/preprocessed \
+  --image_topic /camera/color/image_raw \
+  --points_topic /cloud_registered_body \
+  --camera_info_topic /camera/color/camera_info
+  
+# Preprocessing (no topic renaming)
+docker run \
+  -it \
+  --rm \
+  --net host \
+  -e DISPLAY=$DISPLAY \
+  -e LIBGL_ALWAYS_SOFTWARE=1 \
+  -v $HOME/.Xauthority:/root/.Xauthority \
+  -v ~/calib_bags:/tmp/input_bags \
+  -v ~/preprocessed:/tmp/preprocessed \
+  koide3/direct_visual_lidar_calibration:noetic \
+  rosrun direct_visual_lidar_calibration preprocess -av /tmp/input_bags /tmp/preprocessed 
+
+# Initial guess
+docker run \
+  --rm \
+  --net host \
+  -e DISPLAY=$DISPLAY \
+  -v /tmp/.X11-unix:/tmp/.X11-unix \
+  --device /dev/dri:/dev/dri \
+  -v $HOME/.Xauthority:/root/.Xauthority \
+  -v ~/preprocessed:/tmp/preprocessed \
+  koide3/direct_visual_lidar_calibration:noetic \
+  rosrun direct_visual_lidar_calibration initial_guess_manual /tmp/preprocessed
+
+  # Fine registration
+docker run \
+  --rm \
+  --net host \
+  -e DISPLAY=$DISPLAY \
+  -e LIBGL_ALWAYS_SOFTWARE=1 \
+  -v $HOME/.Xauthority:/root/.Xauthority \
+  -v ~/preprocessed:/tmp/preprocessed \
+  koide3/direct_visual_lidar_calibration:noetic \
+  rosrun direct_visual_lidar_calibration calibrate /tmp/preprocessed
+
+# Result inspection
+docker run \
+  --rm \
+  --net host \
+  -e DISPLAY=$DISPLAY \
+  -e LIBGL_ALWAYS_SOFTWARE=1 \
+  -v $HOME/.Xauthority:/root/.Xauthority \
+  -v ~/preprocessed:/tmp/preprocessed \
+  koide3/direct_visual_lidar_calibration:noetic \
+  rosrun direct_visual_lidar_calibration viewer /tmp/preprocessed

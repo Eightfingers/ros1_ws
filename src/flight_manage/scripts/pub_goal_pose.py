@@ -41,8 +41,8 @@ class PosePublisher:
         # msg.pose.position.y = 2.00
         # msg.pose.position.z = 1.0
 
-        msg.pose.position.x = 0.0
-        msg.pose.position.y = 0.0
+        msg.pose.position.x = 1.5
+        msg.pose.position.y = 1.0
         # msg.pose.position.y = 0.0
         msg.pose.position.z = 1.2
 

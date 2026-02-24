@@ -1,4 +1,0 @@
-export NUM_DRONES=10
-export AGENT_ID=1
-export START_IP=192.168.65.206
-export MY_IP=192.168.65.206 # Not exactly used

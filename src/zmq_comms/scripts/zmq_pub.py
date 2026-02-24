@@ -5,6 +5,7 @@ import rospy
 from geometry_msgs.msg import PoseStamped
 from nav_msgs.msg import Odometry
 import io
+import os, sys
 
 # Reponsible for republishing mavros local position with offsets (therefore its global position) and over ZMQ to other drones
 # Odom and Pose contain the same data value its more for compatibility!!
@@ -17,9 +18,15 @@ class ZMQCommsPub:
         self.subscriber = rospy.Subscriber('/mavros/local_position/pose', PoseStamped, self.pose_callback)
         self.self_drone_pose_pub = rospy.Publisher("/drone_self/global_position/pose", PoseStamped, queue_size=10)
         self.self_drone_odom_pub = rospy.Publisher("/drone_self/global_position/odom", Odometry, queue_size=10)
-        self.offset_x = rospy.get_param('x_offset', 0)
-        self.offset_y = rospy.get_param('y_offset', 0)
-        self.offset_z = rospy.get_param('z_offset', 0)
+
+        print("Loading offsets from environment variables...")
+        try:
+            self.x_offset = float(os.environ['X_OFFSET'])
+            self.y_offset = float(os.environ['Y_OFFSET'])
+            self.z_offset = float(os.environ['Z_OFFSET'])
+        except (ValueError, KeyError) as e:
+            print("Invalid environment variables detected! Ensure that the .env file is loaded and contains valid float values!")
+            sys.exit(1)
 
         # Limit the amount of publishing
         self.counter = 0

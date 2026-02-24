@@ -9,39 +9,41 @@ from nav_msgs.msg import Odometry
 from geometry_msgs.msg import PoseStamped
 from std_msgs.msg import Bool
 from typing import List
-import os
+import os, sys
 import threading
 import time
 
 class ExternalComms():
-    def delayed_publish(self):
-        time.sleep(1)
-        self.move_bool_pub.publish(True)
-
-    def validate_ipv4_address(self, ip_address: str):
-        parts = ip_address.split('.')
-        if len(parts) != 4:
-            raise ValueError("Invalid IPv4 address: must contain exactly four octets.")
-        for part in parts:
-            if not part.isdigit():
-                raise ValueError(f"Invalid octet detected! '{part}': must be numeric.")
-            value = int(part)
-            if not (0 <= value <= 255):
-                raise ValueError(f"Invalid octet detected! '{part}': must be in range 0–255.")
 
     def __init__(self):
         rospy.init_node('other_drone_odometry', anonymous=True)
         rospy.on_shutdown(self.shutdown_node)
 
         # Variables
-        self.global_polling = True
         self.num_drones = int(os.environ['NUM_DRONES'])
-
         self.agent_id = int(os.environ['AGENT_ID'])
         self.str_start_ip = os.environ['START_IP']
+        self.ground_station_ip = os.environ['GROUND_STATION_IP']
+
+        print("Loading configuration from environment variables...")
+        try:
+            self.num_drones = int(os.environ['NUM_DRONES'])
+            self.agent_id = int(os.environ['AGENT_ID'])
+            self.str_start_ip = os.environ['START_IP']
+            self.ground_station_ip = os.environ['GROUND_STATION_IP']
+        except KeyError as e:
+            # This triggers if a variable is MISSING
+            print(f"CRITICAL: Environment variable {e} is not set!")
+            sys.exit(1)
+        except ValueError as e:
+            # This triggers if int() conversion FAILS (e.g., NUM_DRONES="abc")
+            print(f"CRITICAL: Environment variable has invalid type: {e}")
+            sys.exit(1)
+
+        self.global_polling = True
         self.validate_ipv4_address(self.str_start_ip)
         self.num_pub_sub_pairs = int(self.num_drones)
-        parts = self.str_start_ip.split('.')        
+        parts = self.str_start_ip.split('.')
         self.start_ip_fourth_octet = int(parts[3])
         self.str_first_second_third_octet = parts[0] + "." + parts[1] + "." + parts[2] + "."
 
@@ -77,7 +79,7 @@ class ExternalComms():
         self.poller = zmq.Poller()
         # Goal socket
         self.goal_sub_socket = self.context.socket(zmq.SUB)
-        self.goal_publisher_address = rospy.get_param('goal_publisher_address', "tcp://192.168.65.146:5555")
+        self.goal_publisher_address = "tcp://{}:5555".format(self.ground_station_ip)
         print("Listening goal poses at: " + self.goal_publisher_address)
         self.goal_sub_socket.connect(self.goal_publisher_address)
         self.goal_sub_socket.setsockopt_string(zmq.SUBSCRIBE, "GoalPose")
@@ -93,6 +95,21 @@ class ExternalComms():
             self.zmq_sockets_map[socket] = i
             self.poller.register(socket, zmq.POLLIN)
             print(f"ZMQ socket for tcp://{str_current_ip}:5555 is established")
+
+    def delayed_publish(self):
+        time.sleep(1)
+        self.move_bool_pub.publish(True)
+
+    def validate_ipv4_address(self, ip_address: str):
+        parts = ip_address.split('.')
+        if len(parts) != 4:
+            raise ValueError("Invalid IPv4 address: must contain exactly four octets.")
+        for part in parts:
+            if not part.isdigit():
+                raise ValueError(f"Invalid octet detected! '{part}': must be numeric.")
+            value = int(part)
+            if not (0 <= value <= 255):
+                raise ValueError(f"Invalid octet detected! '{part}': must be in range 0–255.")
 
     def run_poller(self):
         while self.global_polling:

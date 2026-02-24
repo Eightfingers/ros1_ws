@@ -14,6 +14,7 @@ from quadrotor_msgs.msg import PositionCommand
 
 from std_msgs.msg import Header
 import math
+import os, sys
 
 ## Parameters
 TAKEOFF_HEIGHT = 1.1 
@@ -32,66 +33,6 @@ class AGENT_STATES:
 
 class AgentStateManager:
 
-    def command_callback(self, data):
-        self.input_commands.velocity.x = data.velocity.x
-        self.input_commands.velocity.y = data.velocity.y
-        self.input_commands.velocity.z = data.velocity.z
-
-        self.input_commands.position.x = data.position.x
-        self.input_commands.position.y = data.position.y
-        self.input_commands.position.z = data.position.z
-
-        self.input_commands.yaw = data.yaw
-        self.last_valid_cmd = data.header.stamp
-
-    def pose_callback(self, data):
-        self.agent_pose = data
-
-    def px4_state_cb(self, data):
-        self.px4_current_state = data
-        rospy.loginfo("PX4_STATE: {}, ARMED_STATE: {}, AGENT_STATE: {}".format(self.px4_current_state.mode, self.px4_current_state.armed, self.agent_state))
-
-    def agent_state_callback(self, data):
-        self.agent_state = int(data.data) 
-        rospy.loginfo("New agent state input!!: {}".format(self.agent_state))
-
-    def check_conditional_flags(self):
-            # Ensure enough time has passed between subsequent PX4 requests
-            self.px4_request_available_flag = (rospy.Time.now() - self.last_req) > rospy.Duration(5.0)
-            # Ensure that command to be sent is recent enough
-            self.recent_command_flag = rospy.Time.now() - self.last_valid_cmd < rospy.Duration(1.0)
-
-            # Check for small vel
-            vx = self.input_commands.velocity.x
-            vy = self.input_commands.velocity.y
-            vz = self.input_commands.velocity.z
-            print("Velocity, X: {}, Y: {}, Z: {} -- Yaw: {}".format(self.input_commands.velocity.x, self.input_commands.velocity.y, self.input_commands.velocity.z, self.input_commands.yaw))
-            # Calculate magnitude
-            magnitude = math.sqrt(vx**2 + vy**2 + vz**2)
-            if (magnitude < SMALL_VEL_MAGNITUDE and self.agent_state == AGENT_STATES.RUNNING):
-                self.agent_state = AGENT_STATES.HOVERING
-                self.small_vel = True
-            else:
-                self.small_vel = False
-
-            # Check which axis has smaller velocities
-            if (vx < SMALL_VEL_AXIS):
-                self.small_x_vel = True
-            else:
-                self.small_x_vel = False
-            if (vy < SMALL_VEL_AXIS):
-                self.small_y_vel = True
-            else:
-                self.small_y_vel = False
-    
-    def check_takeoff_finished(self):
-        return self.agent_pose.pose.position.z >= 0.90 * TAKEOFF_HEIGHT
-
-    def update_hover_position(self):
-        self.hover_position_msg.position.x = self.agent_pose.pose.position.x
-        self.hover_position_msg.position.y = self.agent_pose.pose.position.y
-        self.hover_position_msg.position.z = self.agent_pose.pose.position.z
-
     def __init__(self):
         self.input_commands = PositionTarget()
         self.hover_position_msg = PositionTarget()
@@ -99,6 +40,16 @@ class AgentStateManager:
         self.yaw = 0.0
         self.agent_state = AGENT_STATES.INIT 
         self.px4_current_state = State()
+        self.agent_id = int(os.environ['AGENT_ID'])
+
+        print("Loading offsets from environment variables...")
+        try:
+            self.x_offset = float(os.environ['X_OFFSET'])
+            self.y_offset = float(os.environ['Y_OFFSET'])
+            self.z_offset = float(os.environ['Z_OFFSET'])
+        except (ValueError, KeyError) as e:
+            print("Invalid environment variables detected! Ensure that the .env file is loaded and contains valid float values!")
+            sys.exit(1)
 
         # Flags
         self.px4_request_available_flag = False 
@@ -114,16 +65,17 @@ class AgentStateManager:
         self.setpoint_pub = rospy.Publisher("/mavros/setpoint_raw/local", PositionTarget, queue_size=10)
 
         # Subscribers
-        self.action_sub = rospy.Subscriber("/agent001/action", PositionCommand, self.command_callback)
+        self.action_sub_topic = "/agent00{}/action".format(self.agent_id) if self.agent_id < 10 else "/agent0{}/action".format(self.agent_id)
+        self.action_sub = rospy.Subscriber(self.action_sub_topic, PositionCommand, self.command_callback)
         self.agent_state_sub = rospy.Subscriber("/agent/state", String, self.agent_state_callback)
         self.pose_sub = rospy.Subscriber("/mavros/local_position/pose", PoseStamped, self.pose_callback)
         self.state_sub = rospy.Subscriber("mavros/state", State, self.px4_state_cb)
 
-        rospy.loginfo("Waiting for mavros services")
-        rospy.wait_for_service("/mavros/cmd/arming")
+        # rospy.loginfo("Waiting for mavros services")
+        # rospy.wait_for_service("/mavros/cmd/arming")
         self.arming_client = rospy.ServiceProxy("mavros/cmd/arming", CommandBool)
 
-        rospy.wait_for_service("/mavros/set_mode")
+        # rospy.wait_for_service("/mavros/set_mode")
         self.set_mode_client = rospy.ServiceProxy("mavros/set_mode", SetMode)
 
         # Initialize velocity yaw PositionTarget msgs
@@ -263,6 +215,66 @@ class AgentStateManager:
                 # Do nothing- PX4 handles the landing
                 pass
             rate.sleep()
+
+    def command_callback(self, data):
+        self.input_commands.velocity.x = data.velocity.x
+        self.input_commands.velocity.y = data.velocity.y
+        self.input_commands.velocity.z = data.velocity.z
+
+        self.input_commands.position.x = data.position.x - self.x_offset
+        self.input_commands.position.y = data.position.y - self.y_offset
+        self.input_commands.position.z = data.position.z - self.z_offset
+
+        self.input_commands.yaw = data.yaw
+        self.last_valid_cmd = data.header.stamp
+
+    def pose_callback(self, data):
+        self.agent_pose = data
+
+    def px4_state_cb(self, data):
+        self.px4_current_state = data
+        rospy.loginfo("PX4_STATE: {}, ARMED_STATE: {}, AGENT_STATE: {}".format(self.px4_current_state.mode, self.px4_current_state.armed, self.agent_state))
+
+    def agent_state_callback(self, data):
+        self.agent_state = int(data.data) 
+        rospy.loginfo("New agent state input!!: {}".format(self.agent_state))
+
+    def check_conditional_flags(self):
+            # Ensure enough time has passed between subsequent PX4 requests
+            self.px4_request_available_flag = (rospy.Time.now() - self.last_req) > rospy.Duration(5.0)
+            # Ensure that command to be sent is recent enough
+            self.recent_command_flag = rospy.Time.now() - self.last_valid_cmd < rospy.Duration(1.0)
+
+            # Check for small vel
+            vx = self.input_commands.velocity.x
+            vy = self.input_commands.velocity.y
+            vz = self.input_commands.velocity.z
+            print("Velocity, X: {}, Y: {}, Z: {} -- Yaw: {}".format(self.input_commands.velocity.x, self.input_commands.velocity.y, self.input_commands.velocity.z, self.input_commands.yaw))
+            # Calculate magnitude
+            magnitude = math.sqrt(vx**2 + vy**2 + vz**2)
+            if (magnitude < SMALL_VEL_MAGNITUDE and self.agent_state == AGENT_STATES.RUNNING):
+                self.agent_state = AGENT_STATES.HOVERING
+                self.small_vel = True
+            else:
+                self.small_vel = False
+
+            # Check which axis has smaller velocities
+            if (vx < SMALL_VEL_AXIS):
+                self.small_x_vel = True
+            else:
+                self.small_x_vel = False
+            if (vy < SMALL_VEL_AXIS):
+                self.small_y_vel = True
+            else:
+                self.small_y_vel = False
+    
+    def check_takeoff_finished(self):
+        return self.agent_pose.pose.position.z >= 0.90 * TAKEOFF_HEIGHT
+
+    def update_hover_position(self):
+        self.hover_position_msg.position.x = self.agent_pose.pose.position.x
+        self.hover_position_msg.position.y = self.agent_pose.pose.position.y
+        self.hover_position_msg.position.z = self.agent_pose.pose.position.z
 
 if __name__ == "__main__":
     try:

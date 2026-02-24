@@ -1,0 +1,1 @@
+rosbag record /livox/lidar /livox/imu /cloud_registered_body /camera/color/camera_info /camera/color/image_raw
