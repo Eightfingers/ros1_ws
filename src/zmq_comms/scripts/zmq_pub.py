@@ -41,9 +41,9 @@ class ZMQCommsPub:
     def pose_callback(self, msg):
         # Create a BytesIO buffer for serialization
         buffer = io.BytesIO()
-        msg.pose.position.x += self.offset_x
-        msg.pose.position.y += self.offset_y
-        msg.pose.position.z += self.offset_z
+        msg.pose.position.x += self.x_offset
+        msg.pose.position.y += self.y_offset
+        msg.pose.position.z += self.z_offset
         msg.header.frame_id = 'map'
         self.counter += 1
         
