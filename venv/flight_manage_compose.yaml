@@ -10,11 +10,6 @@ services:
     ipc: host
     
     network_mode: host
-    
-    command: stdbuf -o L roslaunch flight_manage flight_manage.launch
-
-    # 6. Interactive and TTY settings (for -it)
-    #    'stdin_open: true' is equivalent to -i
-    #    'tty: true' is equivalent to -t
-    # stdin_open: true 
-    # tty: true
+  
+    command: bash -c "source /ros1_ws/devel/setup.bash && stdbuf -o L roslaunch flight_manage flight_manage.launch"
+    # command: stdbuf -o L roslaunch flight_manage flight_manage.launch

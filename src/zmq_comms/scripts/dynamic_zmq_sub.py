@@ -98,6 +98,7 @@ class ExternalComms():
 
     def delayed_publish(self):
         time.sleep(1)
+        print("Publishing move bool!!")
         self.move_bool_pub.publish(True)
 
     def validate_ipv4_address(self, ip_address: str):
@@ -128,11 +129,11 @@ class ExternalComms():
                         if agent_index == 1000:
                             goal_deserialized_msg = PoseStamped()
                             goal_deserialized_msg.deserialize(serialized_data)
-                            self.goal_pose_pub.publish(goal_deserialized_msg)
+                            # self.goal_pose_pub.publish(goal_deserialized_msg)
                             threading.Thread(target=self.delayed_publish, daemon=True).start()
-                            print("Recieved goal position x:{}, y:{}, z:{}".format(goal_deserialized_msg.pose.position.x, 
-                                                                                   goal_deserialized_msg.pose.position.y, 
-                                                                                   goal_deserialized_msg.pose.position.z))
+                            # print("Recieved goal position x:{}, y:{}, z:{}".format(goal_deserialized_msg.pose.position.x, 
+                            #                                                        goal_deserialized_msg.pose.position.y, 
+                            #                                                        goal_deserialized_msg.pose.position.z))
                         else:
                             # print(topic.decode())
                             odometry_msg = Odometry()
