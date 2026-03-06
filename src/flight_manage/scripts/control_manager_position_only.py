@@ -63,6 +63,7 @@ class AgentStateManager:
 
         # Publishers
         self.setpoint_pub = rospy.Publisher("/mavros/setpoint_raw/local", PositionTarget, queue_size=10)
+        self.position_setpoint_pub = rospy.Publisher("/mavros/setpoint_position/local", PoseStamped, queue_size=10)
 
         # Subscribers
         self.action_sub_topic = "/agent00{}/action".format(self.agent_id) if self.agent_id < 10 else "/agent0{}/action".format(self.agent_id)
@@ -212,6 +213,26 @@ class AgentStateManager:
                 # rospy.loginfo("Velocity, X: {}, Y: {}, Z: {} -- Yaw: {}".format(self.input_commands.velocity.x, self.input_commands.velocity.y, self.input_commands.velocity.z, self.input_commands.yaw))
                 if (self.recent_command_flag):
                     self.setpoint_pub.publish(self.input_commands)
+
+                    tmp_msg = PoseStamped()
+                    tmp_msg.header = rospy.Time.now()
+                    tmp_msg.pose.position.x = self.input_commands.position.x
+                    tmp_msg.pose.position.y = self.input_commands.position.y
+                    tmp_msg.pose.position.z = self.input_commands.position.z
+
+                    # If it doesnt work
+                    # tmp_msg.pose.orientation.x = 0
+                    # tmp_msg.pose.orientation.y = 0
+                    # tmp_msg.pose.orientation.z = 0
+                    # tmp_msg.pose.orientation.w = 1
+
+                    half = self.input_commands.yaw / 2.0
+                    tmp_msg.pose.orientation.x = 0
+                    tmp_msg.pose.orientation.y = 0
+                    tmp_msg.pose.orientation.z = math.sin(half)
+                    tmp_msg.pose.orientation.w = math.cos(half)
+                    self.position_setpoint_pub.publish(tmp_msg)
+
                 else:
                     self.agent_state = AGENT_STATES.HOVERING 
                     print("Going back to Hovering state- No valid velocity commands received recently")
